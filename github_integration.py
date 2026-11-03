@@ -59,7 +59,7 @@ def create_healing_pr(fix_data: dict) -> str:
         not found.
     """
 
-    file_path: str = fix_data["file_path"]
+    file_path: str = fix_data["file_path"].lstrip("./").lstrip("/")
     search_string: str = fix_data["search_string"]
     replacement_string: str = fix_data["replacement_string"]
     commit_message: str = fix_data["commit_message"]
@@ -98,11 +98,13 @@ def create_healing_pr(fix_data: dict) -> str:
     original_content: str = contents.decoded_content.decode("utf-8")
 
     if search_string not in original_content:
-        raise RuntimeError(
-            f"search_string not found in '{file_path}'. "
-            "The LLM may have hallucinated the snippet. "
-            "Manual intervention required."
-        )
+        if search_string.strip() in original_content:
+            search_string = search_string.strip()
+        else:
+            raise RuntimeError(
+                f"search_string '{search_string}' not found in '{file_path}'. "
+                "The target line was not found in the file."
+            )
 
     # ── 4. Apply the fix ─────────────────────────────────────────────
     updated_content = original_content.replace(
