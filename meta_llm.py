@@ -33,6 +33,11 @@ Your task:
 2. Determine the precise file and code segment that must change.
 3. Produce the minimal, safe fix.
 
+CRITICAL RULES:
+- If a package dependency cannot be found on the public registry (e.g. "No matching distribution found" or "404 Not Found"), do NOT just remove version constraints while leaving the nonexistent package name. Instead, remove or comment out the line (e.g. "# <package_name> removed: dependency unavailable on PyPI") so the build cleanly passes.
+- search_string must be the exact text in the file that causes the failure.
+- commit_message must be a standard, professional English sentence without any conventional commit prefixes (no feat:, fix:, chore:, docs:).
+
 RESPONSE FORMAT — you MUST output **only** a valid JSON object (no markdown \
 fences, no commentary, no extra keys). The JSON object must contain exactly \
 these four keys:
