@@ -28,13 +28,11 @@ jobs:
             RAW_LOG=$(gh run view ${{ github.event.workflow_run.id }} --log-failed 2>&1 | tail -n 100 || echo "Build failed during step execution.")
           fi
           
-          # Encode log safely into JSON
-          JSON_PAYLOAD=$(jq -n \
+          # Encode log safely into JSON file
+          jq -n \
             --arg build_id "gh-run-${{ github.event.workflow_run.id || github.run_id }}" \
             --arg log_output "$RAW_LOG" \
-            '{build_id: $build_id, log_output: $log_output}')
-          
-          echo "payload=$JSON_PAYLOAD" >> "$GITHUB_OUTPUT"
+            '{build_id: $build_id, log_output: $log_output}' > payload.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -46,8 +44,9 @@ jobs:
           if [ "$WEBHOOK_URL" != "http://localhost:8000/webhook" ]; then
             curl -s -X POST "$WEBHOOK_URL" \
               -H "Content-Type: application/json" \
-              -d '${{ steps.extract_log.outputs.payload }}'
+              -d @payload.json
           else
             echo "Notice: HEALING_AGENT_WEBHOOK_URL secret not set. Payload prepared for agent interception."
+            cat payload.json
           fi
 
