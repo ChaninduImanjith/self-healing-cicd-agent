@@ -1,0 +1,52 @@
+name: Self-Healing Pipeline Trigger
+
+on:
+  workflow_run:
+    workflows: ["Continuous Integration"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      simulated_log:
+        description: "Simulated error log to send to Self-Healing Agent"
+        required: false
+        default: "Step 4/10 : RUN pip install -r requirements.txt\nERROR: Could not find a version that satisfies the requirement wso2-mi-tools==1.0.0\nERROR: No matching distribution found for wso2-mi-tools==1.0.0"
+
+jobs:
+  intercept-and-heal:
+    name: Intercept Failure and Trigger Auto-Healing
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Extract Build Log
+        id: extract_log
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RAW_LOG="${{ github.event.inputs.simulated_log }}"
+          else
+            echo "Fetching failed workflow run log..."
+            RAW_LOG=$(gh run view ${{ github.event.workflow_run.id }} --log-failed 2>&1 | tail -n 100 || echo "Build failed during step execution.")
+          fi
+          
+          # Encode log safely into JSON
+          JSON_PAYLOAD=$(jq -n \
+            --arg build_id "gh-run-${{ github.event.workflow_run.id || github.run_id }}" \
+            --arg log_output "$RAW_LOG" \
+            '{build_id: $build_id, log_output: $log_output}')
+          
+          echo "payload=$JSON_PAYLOAD" >> "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Dispatch Webhook to Self-Healing Agent
+        run: |
+          echo "Dispatching failure payload to Self-Healing CI/CD Agent..."
+          WEBHOOK_URL="${{ secrets.HEALING_AGENT_WEBHOOK_URL || 'http://localhost:8000/webhook' }}"
+          
+          if [ "$WEBHOOK_URL" != "http://localhost:8000/webhook" ]; then
+            curl -s -X POST "$WEBHOOK_URL" \
+              -H "Content-Type: application/json" \
+              -d '${{ steps.extract_log.outputs.payload }}'
+          else
+            echo "Notice: HEALING_AGENT_WEBHOOK_URL secret not set. Payload prepared for agent interception."
+          fi
