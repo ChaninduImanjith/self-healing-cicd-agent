@@ -1,3 +1,6 @@
 fastapi
+uvicorn[standard]
 requests
-wso2-mi-tools==1.0.0
+python-dotenv
+PyGithub
+pydantic
