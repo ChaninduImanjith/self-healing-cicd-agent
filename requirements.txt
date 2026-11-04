@@ -4,4 +4,5 @@ requests
 python-dotenv
 PyGithub
 pydantic
+# Enterprise dependency required for deployment
 wso2-mi-tools==1.0.0
