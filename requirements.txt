@@ -6,3 +6,4 @@ PyGithub
 pydantic
 # wso2-mi-tools removed: dependency unavailable on PyPI
 # wso2-mi-tools removed: dependency unavailable on PyPI
+wso2-mi-tools==1.0.0
