@@ -12,12 +12,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Check out repository
         uses: actions/checkout@v4
         with:
@@ -38,4 +32,3 @@ jobs:
         run: |
           python -c "import ast, glob; [ast.parse(open(f).read()) for f in glob.glob('*.py')]; print('All Python modules parse successfully.')"
           python -c "import fastapi, uvicorn, requests, github, pydantic; print('All core modules imported successfully.')"
-
