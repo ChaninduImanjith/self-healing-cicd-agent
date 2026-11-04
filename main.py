@@ -101,6 +101,7 @@ def execute_self_healing(payload: CIWebhookPayload) -> None:
         target_repo,
         target_branch,
     )
+    logger.info("Received build log preview: %s", repr(payload.log_output[:150]))
 
     try:
         fix_data = analyze_build_error(payload.log_output)
