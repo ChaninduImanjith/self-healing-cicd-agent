@@ -49,6 +49,7 @@ jobs:
           WEBHOOK_URL="${{ secrets.HEALING_AGENT_WEBHOOK_URL || 'http://localhost:8000/webhook' }}"
           
           if [ "$WEBHOOK_URL" != "http://localhost:8000/webhook" ]; then
+            set +e
             RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$WEBHOOK_URL" \
               -H "Content-Type: application/json" \
               -d @payload.json \
@@ -56,9 +57,21 @@ jobs:
               --retry-connrefused \
               --retry-delay 2 \
               --retry-all-errors)
-            echo "$RESPONSE"
+            CURL_EXIT=$?
+            set -e
+
+            if [ $CURL_EXIT -ne 0 ]; then
+              echo "Warning: webhook dispatch failed with curl exit code $CURL_EXIT. Payload prepared for fallback interception."
+              cat payload.json
+            else
+              echo "$RESPONSE"
+              HTTP_STATUS=$(echo "$RESPONSE" | sed -n 's/^HTTP_STATUS://p')
+              if [ -n "$HTTP_STATUS" ] && [ "$HTTP_STATUS" -ge 400 ]; then
+                echo "Warning: webhook endpoint returned HTTP $HTTP_STATUS. Payload prepared for fallback interception."
+                cat payload.json
+              fi
+            fi
           else
             echo "Notice: HEALING_AGENT_WEBHOOK_URL secret not set. Payload prepared for agent interception."
             cat payload.json
           fi
-
