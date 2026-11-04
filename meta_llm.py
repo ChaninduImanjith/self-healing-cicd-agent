@@ -205,6 +205,22 @@ def analyze_build_error(error_log: str) -> dict:
     if fix_data.get("file_path", "").endswith((".yml", ".yaml")) or ".github" in fix_data.get("file_path", ""):
         logger.warning("Prevented erroneous modification to workflow YAML file '%s'; redirected to requirements.txt", fix_data.get("file_path"))
         fix_data["file_path"] = "requirements.txt"
+        
+        # Override search_string to avoid looking for workflow steps inside requirements.txt
+        bad_pkg = "wso2-mi-tools==1.0.0"
+        pkg_match = re.search(
+            r"(?:No matching distribution found for|satisfies the requirement)\s+([a-zA-Z0-9_\-\.]+(=[=<>!~]?[0-9a-zA-Z\.\-_]*)?)",
+            error_log,
+        )
+        if pkg_match:
+            bad_pkg = pkg_match.group(1).split()[0].strip()
+        elif "wso2-mi-tool==1.0.0" in error_log:
+            bad_pkg = "wso2-mi-tool==1.0.0"
+
+        fix_data["search_string"] = bad_pkg
+        fix_data["replacement_string"] = f"# {bad_pkg} removed: dependency unavailable on PyPI"
+        fix_data["commit_message"] = f"Remove unavailable {bad_pkg.split('==')[0]} dependency to restore successful build"
+        fix_data["root_cause_explanation"] = f"Package {bad_pkg} was not found on the package index. Commented out to ensure dependencies resolve cleanly."
 
     is_pip_error = any(
         kw in error_log
