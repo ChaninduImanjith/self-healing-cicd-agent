@@ -37,11 +37,13 @@ Your task:
 3. Produce the minimal, safe fix.
 
 CRITICAL RULES:
-- Focus exclusively on the fatal error that caused the non-zero exit code (e.g. "ERROR:", "No matching distribution found", "Traceback"). Completely IGNORE GitHub Actions runner deprecation warnings.
-- For pip install dependency failures, ALWAYS patch the package list in "requirements.txt". NEVER attempt to modify CI workflow files (.github/workflows/*.yml) to bypass dependency errors.
+- NEVER EVER return a CI workflow file (.github/workflows/*.yml or *.yaml) as file_path! CI workflow files are strictly immutable infrastructure. If a source file failed during validation or test (e.g. SyntaxError or test failure in "calculator.py"), file_path MUST be that specific source code file (e.g. "calculator.py"), NEVER the workflow file!
+- Focus exclusively on the fatal error that caused the non-zero exit code (e.g. "ERROR:", "No matching distribution found", "Traceback", "SyntaxError"). Completely IGNORE GitHub Actions runner deprecation warnings.
+- For pip install dependency failures, ALWAYS patch the package list in "requirements.txt".
+- When a code syntax error, missing import, or test failure occurs, identify the exact repository source file from the traceback and fix the code directly in that file.
 - If a package dependency cannot be found on the public registry (e.g. "No matching distribution found" or "404 Not Found"), do NOT just remove version constraints while leaving the nonexistent package name. Instead, remove or comment out the line (e.g. "# <package_name> removed: dependency unavailable on PyPI") in requirements.txt so the build cleanly passes.
-- file_path MUST be a valid relative repository file path (e.g. "requirements.txt", "Dockerfile"). NEVER return "UNKNOWN" for standard dependency errors.
-- search_string must be the exact text in the file that causes the failure (e.g. "wso2-mi-tools==1.0.0").
+- file_path MUST be a valid relative repository file path (e.g. "requirements.txt", "calculator.py", "Dockerfile"). NEVER return "UNKNOWN".
+- search_string must be the exact text in the file that causes the failure (e.g. "wso2-mi-tools==1.0.0" or "def calculate_discount(price: float, percentage: float) -> float::").
 - commit_message must be a standard, professional English sentence without any conventional commit prefixes (no feat:, fix:, chore:, docs:).
 
 RESPONSE FORMAT — you MUST output **only** a valid JSON object (no markdown \
@@ -227,9 +229,22 @@ def analyze_build_error(error_log: str) -> dict:
         elif "Dockerfile" in error_log:
             fix_data["file_path"] = "Dockerfile"
         else:
-            code_match = re.search(r"File [\"']([^\"']+\.(?:py|js|ts|go|java|rs))[\"']", error_log)
-            if code_match:
-                fix_data["file_path"] = code_match.group(1)
+            # Look for application repository files in traceback
+            code_matches = re.findall(r"File [\"']([^\"']+\.(?:py|js|ts|go|java|rs))[\"']", error_log)
+            repo_files = [f for f in code_matches if not f.startswith(("/", "<", "site-packages"))]
+            if repo_files:
+                target_code_file = repo_files[-1]  # The most specific failing line is usually the last traceback frame
+                fix_data["file_path"] = target_code_file
+                # If there's a syntax error line in the log, extract it
+                syntax_line_match = re.search(r"File [\"']" + re.escape(target_code_file) + r"[\"'], line \d+\s*\n\s*([^\n\^]+)", error_log)
+                if syntax_line_match:
+                    buggy_line = syntax_line_match.group(1).strip()
+                    fix_data["search_string"] = buggy_line
+                    # Remove syntax defects like double colons
+                    if "::" in buggy_line:
+                        fix_data["replacement_string"] = buggy_line.replace("::", ":")
+                        fix_data["commit_message"] = f"Fix syntax error in {target_code_file} by correcting punctuation"
+                        fix_data["root_cause_explanation"] = f"Corrected invalid syntax in {target_code_file}."
             else:
                 fix_data["file_path"] = "requirements.txt"
 
