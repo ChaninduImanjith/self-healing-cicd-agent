@@ -134,6 +134,8 @@ curl -X POST http://localhost:8000/webhook \
 {
   "status": "healed",
   "build_id": "run-48291",
+  "repository": "your-username/your-repo",
+  "target_branch": "main",
   "pr_url": "https://github.com/your-username/your-repo/pull/42",
   "fix_summary": {
     "file_path": "requirements.txt",
@@ -143,6 +145,27 @@ curl -X POST http://localhost:8000/webhook \
   }
 }
 ```
+
+## 🌐 Universal Multi-Project Support (Any Repository)
+
+This agent acts as a **centralized self-healing platform** for entire engineering organizations. It is not limited to healing itself—it can autonomously heal **any repository, microservice, or technology stack** (Node.js, Go, Python, Java, Docker, Kubernetes manifests).
+
+To connect any repository, include `repo_owner`, `repo_name`, and optional `branch` in the webhook payload:
+
+```bash
+curl -X POST http://localhost:8000/webhook \
+  -H "Content-Type: application/json" \
+  -d '{
+    "build_id": "payment-svc-build-812",
+    "repo_owner": "YourOrg",
+    "repo_name": "payments-microservice",
+    "branch": "develop",
+    "ci_provider": "github-actions",
+    "log_output": "npm ERR! code ENOENT\nnpm ERR! syscall open\nnpm ERR! path /package.json"
+  }'
+```
+
+The agent will automatically authenticate to `YourOrg/payments-microservice`, branch from `develop`, apply the surgical fix, and open the Pull Request on that target repository!
 
 ## Connecting to a Real CI/CD System
 

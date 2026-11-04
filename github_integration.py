@@ -12,6 +12,8 @@ from datetime import datetime, timezone
 from dotenv import load_dotenv
 from github import Auth, Github, GithubException
 
+from typing import Optional
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -21,24 +23,31 @@ GITHUB_REPO_OWNER: str = os.getenv("GITHUB_REPO_OWNER", "")
 GITHUB_REPO_NAME: str = os.getenv("GITHUB_REPO_NAME", "")
 
 
-def _get_repo():
+def _get_repo(repo_owner: Optional[str] = None, repo_name: Optional[str] = None):
     """Authenticate and return the target ``Repository`` object."""
     if not GITHUB_TOKEN:
         raise RuntimeError(
             "GITHUB_TOKEN is not set. Add it to your .env file."
         )
-    if not GITHUB_REPO_OWNER or not GITHUB_REPO_NAME:
+    owner = repo_owner or GITHUB_REPO_OWNER
+    name = repo_name or GITHUB_REPO_NAME
+    if not owner or not name:
         raise RuntimeError(
-            "GITHUB_REPO_OWNER and GITHUB_REPO_NAME must be set in .env."
+            "Target repository coordinates missing. Provide repo_owner and repo_name in the webhook payload or set GITHUB_REPO_OWNER and GITHUB_REPO_NAME in .env."
         )
 
     gh = Github(auth=Auth.Token(GITHUB_TOKEN))
-    repo = gh.get_repo(f"{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}")
-    logger.info("Authenticated to GitHub repo: %s", repo.full_name)
+    repo = gh.get_repo(f"{owner}/{name}")
+    logger.info("Authenticated to target GitHub repo: %s", repo.full_name)
     return repo
 
 
-def create_healing_pr(fix_data: dict) -> str:
+def create_healing_pr(
+    fix_data: dict,
+    repo_owner: Optional[str] = None,
+    repo_name: Optional[str] = None,
+    target_branch: Optional[str] = None,
+) -> str:
     """Apply *fix_data* to a new branch and open a Pull Request.
 
     Parameters
@@ -46,6 +55,12 @@ def create_healing_pr(fix_data: dict) -> str:
     fix_data : dict
         Must contain ``file_path``, ``search_string``,
         ``replacement_string``, and ``commit_message``.
+    repo_owner : str, optional
+        Target GitHub repository owner. Defaults to GITHUB_REPO_OWNER in .env.
+    repo_name : str, optional
+        Target GitHub repository name. Defaults to GITHUB_REPO_NAME in .env.
+    target_branch : str, optional
+        Base branch to branch off and merge into. Defaults to repository default branch.
 
     Returns
     -------
@@ -64,14 +79,14 @@ def create_healing_pr(fix_data: dict) -> str:
     replacement_string: str = fix_data["replacement_string"]
     commit_message: str = fix_data["commit_message"]
 
-    repo = _get_repo()
+    repo = _get_repo(repo_owner, repo_name)
 
-    # ── 1. Resolve the default branch (usually "main") ───────────────
-    default_branch: str = repo.default_branch
-    base_ref = repo.get_git_ref(f"heads/{default_branch}")
+    # ── 1. Resolve base branch ───────────────────────────────────────
+    base_branch: str = target_branch or repo.default_branch
+    base_ref = repo.get_git_ref(f"heads/{base_branch}")
     base_sha: str = base_ref.object.sha
     logger.info(
-        "Default branch '%s' at commit %s", default_branch, base_sha[:8]
+        "Target branch '%s' at commit %s", base_branch, base_sha[:8]
     )
 
     # ── 2. Create a uniquely-named fix branch ────────────────────────
@@ -144,7 +159,7 @@ def create_healing_pr(fix_data: dict) -> str:
             title=pr_title,
             body=pr_body,
             head=new_branch,
-            base=default_branch,
+            base=base_branch,
         )
     except GithubException as exc:
         raise RuntimeError(

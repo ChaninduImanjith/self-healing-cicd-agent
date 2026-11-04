@@ -7,6 +7,9 @@ with the proposed fix.
 """
 
 import logging
+import os
+
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -34,7 +37,7 @@ app = FastAPI(
 
 # ── Request / Response models ───────────────────────────────────────────
 class CIWebhookPayload(BaseModel):
-    """Payload sent by a CI/CD system (GitHub Actions, Jenkins, etc.)."""
+    """Payload sent by any CI/CD system (GitHub Actions, Jenkins, GitLab, etc.)."""
 
     build_id: str = Field(
         ...,
@@ -48,6 +51,26 @@ class CIWebhookPayload(BaseModel):
             "ERROR: Could not find a version that satisfies the requirement foo==9.9.9"
         ],
     )
+    repo_owner: Optional[str] = Field(
+        None,
+        description="Target GitHub organization or username (optional, falls back to .env default).",
+        examples=["ChaninduImanjith"],
+    )
+    repo_name: Optional[str] = Field(
+        None,
+        description="Target GitHub repository name (optional, falls back to .env default).",
+        examples=["self-healing-cicd-agent"],
+    )
+    branch: Optional[str] = Field(
+        None,
+        description="Target base branch to branch off and merge into (optional, defaults to repo default branch).",
+        examples=["main"],
+    )
+    ci_provider: Optional[str] = Field(
+        "github-actions",
+        description="Originating CI/CD platform (e.g. github-actions, jenkins, gitlab-ci).",
+        examples=["github-actions"],
+    )
 
 
 class HealingResponse(BaseModel):
@@ -55,6 +78,8 @@ class HealingResponse(BaseModel):
 
     status: str = "healed"
     build_id: str
+    repository: str
+    target_branch: str
     pr_url: str
     fix_summary: dict
 
@@ -90,10 +115,17 @@ async def receive_webhook(payload: CIWebhookPayload):
        merge.
     """
 
+    target_owner = payload.repo_owner or os.getenv("GITHUB_REPO_OWNER", "")
+    target_repo = payload.repo_name or os.getenv("GITHUB_REPO_NAME", "")
+    target_branch = payload.branch or "default"
+
     logger.info(
-        "Webhook received — build_id=%s, log length=%d chars",
+        "Webhook received — build_id=%s, target=%s/%s (branch: %s), provider=%s",
         payload.build_id,
-        len(payload.log_output),
+        target_owner,
+        target_repo,
+        target_branch,
+        payload.ci_provider,
     )
 
     # ── Step 1: AI Analysis ──────────────────────────────────────────
@@ -114,7 +146,12 @@ async def receive_webhook(payload: CIWebhookPayload):
 
     # ── Step 2: GitHub Auto-Heal ─────────────────────────────────────
     try:
-        pr_url = create_healing_pr(fix_data)
+        pr_url = create_healing_pr(
+            fix_data=fix_data,
+            repo_owner=payload.repo_owner,
+            repo_name=payload.repo_name,
+            target_branch=payload.branch,
+        )
     except RuntimeError as exc:
         logger.error("GitHub integration failed: %s", exc)
         raise HTTPException(
@@ -126,6 +163,8 @@ async def receive_webhook(payload: CIWebhookPayload):
 
     return HealingResponse(
         build_id=payload.build_id,
+        repository=f"{target_owner}/{target_repo}",
+        target_branch=target_branch,
         pr_url=pr_url,
         fix_summary=fix_data,
     )
