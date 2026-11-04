@@ -96,7 +96,7 @@ def analyze_build_error(error_log: str) -> dict:
             },
         ],
         "temperature": 0.1,
-        "max_tokens": 4096,
+        "max_tokens": 8192,
     }
 
     logger.info("Sending build log to Meta Llama API (%s)…", META_MODEL)
