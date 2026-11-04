@@ -13,6 +13,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+RUN git init 2>/dev/null || true
 
 EXPOSE 8000
 
