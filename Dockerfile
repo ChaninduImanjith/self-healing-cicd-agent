@@ -13,6 +13,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
+RUN if [ ! -d .git ]; then git init || true; fi
+RUN git config --global --add safe.directory '*' || true
 
 EXPOSE 8000
 
