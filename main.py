@@ -115,7 +115,10 @@ def execute_self_healing(payload: CIWebhookPayload) -> None:
             repo_name=payload.repo_name,
             target_branch=payload.branch,
         )
-        logger.info("Autonomous healing complete — PR: %s", pr_url)
+        if pr_url:
+            logger.info("Autonomous healing complete — PR: %s", pr_url)
+        else:
+            logger.info("Target file already clean on target branch — no PR required.")
     except Exception as exc:
         logger.error("Background healing failed: %s", exc, exc_info=True)
 

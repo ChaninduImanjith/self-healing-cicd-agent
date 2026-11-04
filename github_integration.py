@@ -162,6 +162,10 @@ def create_healing_pr(
                         logger.error("Requirements failover check encountered error: %s", err)
 
                 if search_string not in original_content:
+                    pkg_name = search_string.split("==")[0].split(">=")[0].split("<=")[0].strip()
+                    if pkg_name not in original_content or any(pkg_name in line and line.strip().startswith("#") for line in original_content.splitlines()):
+                        logger.info("Target package '%s' is already removed or commented out in '%s'. Repository is already clean.", pkg_name, file_path)
+                        return ""
                     raise RuntimeError(
                         f"search_string '{search_string}' not found in '{file_path}'. "
                         "The target line was not found in the file."
