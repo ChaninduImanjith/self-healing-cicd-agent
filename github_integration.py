@@ -168,6 +168,17 @@ def create_healing_pr(
         search_string, replacement_string, 1
     )
 
+    # Safety validation: If updating a YAML workflow file, enforce valid YAML syntax
+    if file_path.endswith((".yml", ".yaml")):
+        try:
+            import yaml
+            yaml.safe_load(updated_content)
+            if updated_content.count("steps:") > 1:
+                raise ValueError("Duplicate 'steps:' key detected in workflow YAML.")
+        except Exception as yaml_err:
+            logger.error("YAML validation failed on proposed fix: %s. Aborting invalid workflow mutation.", yaml_err)
+            raise RuntimeError(f"Proposed YAML fix for '{file_path}' produced invalid syntax: {yaml_err}")
+
     repo.update_file(
         path=file_path,
         message=commit_message,
