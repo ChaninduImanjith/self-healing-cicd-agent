@@ -400,5 +400,5 @@ Distributed under the **MIT License**. See `LICENSE` for more information.
 ---
 
 <p align="center">
-  <b>Built with ❤️ for the Meta Global AI Developer Hackathon</b>
+  <b>Built for the Meta Global AI Developer Hackathon</b>
 </p>
