@@ -30,5 +30,5 @@ jobs:
 
       - name: Validate Python syntax and module imports
         run: |
-          python -c "import ast, glob; [ast.parse(open(f).read()) for f in glob.glob('*.py')]; print('All Python modules parse successfully.')"
+          python -c "import ast, glob; [ast.parse(open(f).read(), filename=f) for f in glob.glob('*.py')]; print('All Python modules parse successfully.')"
           python -c "import fastapi, uvicorn, requests, github, pydantic; print('All core modules imported successfully.')"
