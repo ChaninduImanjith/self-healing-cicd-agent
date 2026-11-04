@@ -28,11 +28,15 @@ jobs:
             RAW_LOG=$(gh run view ${{ github.event.workflow_run.id }} --log-failed 2>&1 | tail -n 100 || echo "Build failed during step execution.")
           fi
           
-          # Encode log safely into JSON file
+          # Encode log safely into JSON file with dynamic repository coordinates
           jq -n \
             --arg build_id "gh-run-${{ github.event.workflow_run.id || github.run_id }}" \
             --arg log_output "$RAW_LOG" \
-            '{build_id: $build_id, log_output: $log_output}' > payload.json
+            --arg repo_owner "${{ github.repository_owner }}" \
+            --arg repo_name "${{ github.event.repository.name }}" \
+            --arg branch "${{ github.ref_name || 'main' }}" \
+            --arg ci_provider "github-actions" \
+            '{build_id: $build_id, log_output: $log_output, repo_owner: $repo_owner, repo_name: $repo_name, branch: $branch, ci_provider: $ci_provider}' > payload.json
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
