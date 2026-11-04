@@ -9,6 +9,7 @@ directly to the repository.
 import json
 import logging
 import os
+import re
 
 import requests
 from dotenv import load_dotenv
@@ -184,12 +185,52 @@ def analyze_build_error(error_log: str) -> dict:
             if fix_data["commit_message"]:
                 fix_data["commit_message"] = fix_data["commit_message"][0].upper() + fix_data["commit_message"][1:]
 
-    # Safety fallback: Never allow "UNKNOWN" file_path to break the pipeline if identifiable from log
-    if fix_data.get("file_path") in ["UNKNOWN", "", None]:
-        if "requirements.txt" in error_log or "pip install" in error_log or "No matching distribution" in error_log:
+    # Safety guardrails: Detect dependency errors and enforce requirements.txt patching
+    is_pip_error = any(
+        kw in error_log
+        for kw in [
+            "No matching distribution found",
+            "Could not find a version that satisfies",
+            "pip install -r requirements.txt",
+            "pip install",
+        ]
+    )
+
+    if is_pip_error:
+        # If the LLM erroneously targeted workflow files or UNKNOWN, redirect to requirements.txt
+        current_fp = fix_data.get("file_path", "")
+        if current_fp in ["UNKNOWN", "", None] or current_fp.endswith((".yml", ".yaml")) or "workflow" in current_fp:
+            logger.warning(
+                "Redirecting erroneous file_path '%s' to 'requirements.txt' for pip dependency failure",
+                current_fp,
+            )
             fix_data["file_path"] = "requirements.txt"
-        elif "Dockerfile" in error_log:
+
+        # Check if failing package is mentioned in error log and verify search_string
+        pkg_match = re.search(
+            r"(?:No matching distribution found for|satisfies the requirement)\s+([a-zA-Z0-9_\-\.]+(=[=<>!~]?[0-9a-zA-Z\.\-_]*)?)",
+            error_log,
+        )
+        if pkg_match:
+            bad_pkg = pkg_match.group(1).split()[0].strip()
+            # If search_string looks like workflow steps or does not contain the failing package, override
+            current_search = fix_data.get("search_string", "")
+            if bad_pkg not in current_search or "steps:" in current_search or "name:" in current_search:
+                logger.warning(
+                    "Correcting malformed search_string '%s' to target package '%s'",
+                    current_search,
+                    bad_pkg,
+                )
+                fix_data["search_string"] = bad_pkg
+                fix_data["replacement_string"] = f"# {bad_pkg} removed: dependency unavailable on PyPI"
+                fix_data["commit_message"] = f"Remove unavailable {bad_pkg} dependency to restore successful pip installation"
+                fix_data["root_cause_explanation"] = f"The package {bad_pkg} was not found on the public package index. Commented out to ensure pipeline dependencies resolve cleanly."
+
+    elif fix_data.get("file_path") in ["UNKNOWN", "", None]:
+        if "Dockerfile" in error_log:
             fix_data["file_path"] = "Dockerfile"
+        else:
+            fix_data["file_path"] = "requirements.txt"
 
     if fix_data.get("commit_message") in ["UNKNOWN", "", None]:
         fix_data["commit_message"] = "Update dependencies to resolve CI/CD build failure"
