@@ -4,4 +4,4 @@ requests
 python-dotenv
 PyGithub
 pydantic
-# wso2-mi-tools removed: dependency unavailable on PyPI
+# # wso2-mi-tools removed: dependency unavailable on PyPI removed: dependency unavailable on PyPI
