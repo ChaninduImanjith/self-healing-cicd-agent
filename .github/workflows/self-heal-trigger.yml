@@ -16,6 +16,9 @@ jobs:
     name: Intercept Failure and Trigger Auto-Healing
     if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
 
     steps:
       - name: Extract Build Log
