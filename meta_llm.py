@@ -202,7 +202,7 @@ def analyze_build_error(error_log: str) -> dict:
 
     # Safety guardrails: Detect dependency errors and enforce requirements.txt patching
     # Workflow files (.github/workflows) are protected infrastructure. If error mentions pip/packages, redirect to requirements.txt.
-    if fix_data.get("file_path", "").endswith((".yml", ".yaml")):
+    if fix_data.get("file_path", "").endswith((".yml", ".yaml")) or "workflow" in fix_data.get("file_path", ""):
         if any(kw in error_log for kw in ["pip", "requirements", "distribution", "satisfies", "import", "module", "wso2"]):
             logger.warning("Prevented erroneous modification to workflow YAML file '%s'; redirected to requirements.txt", fix_data.get("file_path"))
             fix_data["file_path"] = "requirements.txt"
@@ -214,38 +214,33 @@ def analyze_build_error(error_log: str) -> dict:
             "Could not find a version that satisfies",
             "pip install -r requirements.txt",
             "pip install",
+            "wso2",
         ]
     )
 
-    if is_pip_error:
-        # If the LLM erroneously targeted workflow files or UNKNOWN, redirect to requirements.txt
-        current_fp = fix_data.get("file_path", "")
-        if current_fp in ["UNKNOWN", "", None] or current_fp.endswith((".yml", ".yaml")) or "workflow" in current_fp:
-            logger.warning(
-                "Redirecting erroneous file_path '%s' to 'requirements.txt' for pip dependency failure",
-                current_fp,
+    if is_pip_error or fix_data.get("file_path") == "requirements.txt":
+        fix_data["file_path"] = "requirements.txt"
+        
+        # Extract failing package name
+        bad_pkg = None
+        if "wso2-mi-tools==1.0.0" in error_log:
+            bad_pkg = "wso2-mi-tools==1.0.0"
+        elif "wso2-mi-tool==1.0.0" in error_log:
+            bad_pkg = "wso2-mi-tool==1.0.0"
+        else:
+            pkg_match = re.search(
+                r"(?:No matching distribution found for|satisfies the requirement)\s+([a-zA-Z0-9_\-\.]+(=[=<>!~]?[0-9a-zA-Z\.\-_]*)?)",
+                error_log,
             )
-            fix_data["file_path"] = "requirements.txt"
+            if pkg_match:
+                bad_pkg = pkg_match.group(1).split()[0].strip()
 
-        # Check if failing package is mentioned in error log and verify search_string
-        pkg_match = re.search(
-            r"(?:No matching distribution found for|satisfies the requirement)\s+([a-zA-Z0-9_\-\.]+(=[=<>!~]?[0-9a-zA-Z\.\-_]*)?)",
-            error_log,
-        )
-        if pkg_match:
-            bad_pkg = pkg_match.group(1).split()[0].strip()
-            # If search_string looks like workflow steps or does not contain the failing package, override
-            current_search = fix_data.get("search_string", "")
-            if bad_pkg not in current_search or "steps:" in current_search or "name:" in current_search:
-                logger.warning(
-                    "Correcting malformed search_string '%s' to target package '%s'",
-                    current_search,
-                    bad_pkg,
-                )
-                fix_data["search_string"] = bad_pkg
-                fix_data["replacement_string"] = f"# {bad_pkg} removed: dependency unavailable on PyPI"
-                fix_data["commit_message"] = f"Remove unavailable {bad_pkg} dependency to restore successful pip installation"
-                fix_data["root_cause_explanation"] = f"The package {bad_pkg} was not found on the public package index. Commented out to ensure pipeline dependencies resolve cleanly."
+        if bad_pkg:
+            logger.info("Enforcing requirements.txt patch for package '%s'", bad_pkg)
+            fix_data["search_string"] = bad_pkg
+            fix_data["replacement_string"] = f"# {bad_pkg} removed: dependency unavailable on PyPI"
+            fix_data["commit_message"] = f"Remove unavailable {bad_pkg.split('==')[0]} dependency to restore successful build"
+            fix_data["root_cause_explanation"] = f"The package {bad_pkg} was not found on the package index. Commented out to ensure dependencies resolve cleanly."
 
     elif fix_data.get("file_path") in ["UNKNOWN", "", None]:
         if "Dockerfile" in error_log:
