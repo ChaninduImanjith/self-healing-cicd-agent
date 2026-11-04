@@ -30,12 +30,15 @@ Kubernetes manifests.
 
 Your task:
 1. Identify the exact root cause of the failure.
-2. Determine the precise file and code segment that must change.
+2. Determine the precise file and code segment that must change:
+   - For Python / pip install failures (e.g. "pip install -r requirements.txt", "No matching distribution found"), the target file is "requirements.txt".
+   - For Docker build failures, determine whether "Dockerfile" or a dependency file is the culprit.
 3. Produce the minimal, safe fix.
 
 CRITICAL RULES:
-- If a package dependency cannot be found on the public registry (e.g. "No matching distribution found" or "404 Not Found"), do NOT just remove version constraints while leaving the nonexistent package name. Instead, remove or comment out the line (e.g. "# <package_name> removed: dependency unavailable on PyPI") so the build cleanly passes.
-- search_string must be the exact text in the file that causes the failure.
+- If a package dependency cannot be found on the public registry (e.g. "No matching distribution found" or "404 Not Found"), do NOT just remove version constraints while leaving the nonexistent package name. Instead, remove or comment out the line (e.g. "# <package_name> removed: dependency unavailable on PyPI") in requirements.txt so the build cleanly passes.
+- file_path MUST be a valid relative repository file path (e.g. "requirements.txt", "Dockerfile"). NEVER return "UNKNOWN" for standard dependency errors.
+- search_string must be the exact text in the file that causes the failure (e.g. "wso2-mi-tools==1.0.0").
 - commit_message must be a standard, professional English sentence without any conventional commit prefixes (no feat:, fix:, chore:, docs:).
 
 RESPONSE FORMAT — you MUST output **only** a valid JSON object (no markdown \
@@ -43,7 +46,7 @@ fences, no commentary, no extra keys). The JSON object must contain exactly \
 these keys:
 
 {
-  "file_path": "<relative path to the file that needs fixing>",
+  "file_path": "<relative path to the file that needs fixing, e.g. requirements.txt>",
   "search_string": "<the exact existing buggy line(s) to replace — must match the file verbatim>",
   "replacement_string": "<the corrected line(s) that fix the build>",
   "commit_message": "<one professional English sentence describing the fix — do NOT use conventional-commit prefixes like fix: feat: chore: docs:>",
@@ -51,9 +54,6 @@ these keys:
   "risk_level": "LOW",
   "root_cause_explanation": "<one or two sentences explaining why the failure occurred and why this fix resolves it safely>"
 }
-
-If you cannot determine a fix, set every value to the string "UNKNOWN" but \
-still return the JSON object.
 """
 
 
@@ -172,6 +172,16 @@ def analyze_build_error(error_log: str) -> dict:
             fix_data["commit_message"] = fix_data["commit_message"][len(prefix):].strip()
             if fix_data["commit_message"]:
                 fix_data["commit_message"] = fix_data["commit_message"][0].upper() + fix_data["commit_message"][1:]
+
+    # Safety fallback: Never allow "UNKNOWN" file_path to break the pipeline if identifiable from log
+    if fix_data.get("file_path") in ["UNKNOWN", "", None]:
+        if "requirements.txt" in error_log or "pip install" in error_log or "No matching distribution" in error_log:
+            fix_data["file_path"] = "requirements.txt"
+        elif "Dockerfile" in error_log:
+            fix_data["file_path"] = "Dockerfile"
+
+    if fix_data.get("commit_message") in ["UNKNOWN", "", None]:
+        fix_data["commit_message"] = "Update dependencies to resolve CI/CD build failure"
 
     logger.info(
         "LLM fix received — target file: %s", fix_data["file_path"]
