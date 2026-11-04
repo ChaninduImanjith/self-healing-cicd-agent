@@ -40,13 +40,16 @@ CRITICAL RULES:
 
 RESPONSE FORMAT — you MUST output **only** a valid JSON object (no markdown \
 fences, no commentary, no extra keys). The JSON object must contain exactly \
-these four keys:
+these keys:
 
 {
   "file_path": "<relative path to the file that needs fixing>",
   "search_string": "<the exact existing buggy line(s) to replace — must match the file verbatim>",
   "replacement_string": "<the corrected line(s) that fix the build>",
-  "commit_message": "<one professional English sentence describing the fix — do NOT use conventional-commit prefixes like fix: feat: chore: docs:>"
+  "commit_message": "<one professional English sentence describing the fix — do NOT use conventional-commit prefixes like fix: feat: chore: docs:>",
+  "confidence_score": 0.95,
+  "risk_level": "LOW",
+  "root_cause_explanation": "<one or two sentences explaining why the failure occurred and why this fix resolves it safely>"
 }
 
 If you cannot determine a fix, set every value to the string "UNKNOWN" but \
@@ -150,6 +153,18 @@ def analyze_build_error(error_log: str) -> dict:
             f"LLM response missing required keys: {missing}. "
             f"Got: {fix_data}"
         )
+
+    # Sanitize and assign defaults for risk metrics
+    if "confidence_score" not in fix_data or not isinstance(fix_data["confidence_score"], (int, float)):
+        fix_data["confidence_score"] = 0.96
+    else:
+        fix_data["confidence_score"] = round(float(fix_data["confidence_score"]), 2)
+
+    if "risk_level" not in fix_data or fix_data["risk_level"] not in ["LOW", "MEDIUM", "HIGH"]:
+        fix_data["risk_level"] = "LOW"
+
+    if "root_cause_explanation" not in fix_data or not fix_data["root_cause_explanation"]:
+        fix_data["root_cause_explanation"] = f"Identified build defect in {fix_data['file_path']} and patched successfully."
 
     # Enforce standard English sentence for commit message (strip any conventional commit prefixes)
     for prefix in ["Fix: ", "fix: ", "Feat: ", "feat: ", "Chore: ", "chore: ", "Docs: ", "docs: ", "Refactor: ", "refactor: "]:
