@@ -49,9 +49,14 @@ jobs:
           WEBHOOK_URL="${{ secrets.HEALING_AGENT_WEBHOOK_URL || 'http://localhost:8000/webhook' }}"
           
           if [ "$WEBHOOK_URL" != "http://localhost:8000/webhook" ]; then
-            curl -s -X POST "$WEBHOOK_URL" \
+            RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST "$WEBHOOK_URL" \
               -H "Content-Type: application/json" \
-              -d @payload.json
+              -d @payload.json \
+              --retry 3 \
+              --retry-connrefused \
+              --retry-delay 2 \
+              --retry-all-errors)
+            echo "$RESPONSE"
           else
             echo "Notice: HEALING_AGENT_WEBHOOK_URL secret not set. Payload prepared for agent interception."
             cat payload.json
