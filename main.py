@@ -10,7 +10,7 @@ import logging
 import os
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from github_integration import create_healing_pr
@@ -73,14 +73,47 @@ class CIWebhookPayload(BaseModel):
 
 
 class HealingResponse(BaseModel):
-    """Successful response returned after creating a healing PR."""
+    """Response returned upon receiving and processing a self-healing event."""
 
-    status: str = "healed"
+    status: str = "processing"
     build_id: str
     repository: str
     target_branch: str
-    pr_url: str
-    fix_summary: dict
+    message: str
+    pr_url: Optional[str] = None
+    fix_summary: Optional[dict] = None
+
+
+def execute_self_healing(payload: CIWebhookPayload) -> None:
+    """Asynchronous background worker that performs Meta AI analysis and opens GitHub PR."""
+    target_owner = payload.repo_owner or os.getenv("GITHUB_REPO_OWNER", "")
+    target_repo = payload.repo_name or os.getenv("GITHUB_REPO_NAME", "")
+    target_branch = payload.branch or "default"
+
+    logger.info(
+        "Beginning background healing — build_id=%s, target=%s/%s (branch: %s)",
+        payload.build_id,
+        target_owner,
+        target_repo,
+        target_branch,
+    )
+
+    try:
+        fix_data = analyze_build_error(payload.log_output)
+        logger.info(
+            "AI fix proposed — file: %s | commit: %s",
+            fix_data.get("file_path"),
+            fix_data.get("commit_message"),
+        )
+        pr_url = create_healing_pr(
+            fix_data=fix_data,
+            repo_owner=payload.repo_owner,
+            repo_name=payload.repo_name,
+            target_branch=payload.branch,
+        )
+        logger.info("Autonomous healing complete — PR: %s", pr_url)
+    except Exception as exc:
+        logger.error("Background healing failed: %s", exc, exc_info=True)
 
 
 # ── Health check ─────────────────────────────────────────────────────────
@@ -99,18 +132,19 @@ async def health_check():
     "/webhook",
     response_model=HealingResponse,
     tags=["webhook"],
-    summary="Receive a failing CI/CD build log and auto-heal it",
+    summary="Receive a failing CI/CD build log and auto-heal it asynchronously",
 )
-async def receive_webhook(payload: CIWebhookPayload):
+async def receive_webhook(
+    payload: CIWebhookPayload,
+    background_tasks: BackgroundTasks,
+):
     """
     End-to-end self-healing pipeline:
 
-    1. **Receive** the failing build log from any CI/CD system.
-    2. **Analyze** the log with Meta Llama 3 to produce a structured fix.
+    1. **Acknowledge** webhook immediately to prevent upstream timeouts (e.g. Cloudflare / API gateways).
+    2. **Analyze** the log asynchronously using Meta AI (muse-spark-1.3 reasoning engine).
     3. **Apply** the fix on a new branch and open a Pull Request via GitHub API.
-    4. **Return** the PR URL so the CI system or developer can review and merge.
     """
-
     target_owner = payload.repo_owner or os.getenv("GITHUB_REPO_OWNER", "")
     target_repo = payload.repo_name or os.getenv("GITHUB_REPO_NAME", "")
     target_branch = payload.branch or "default"
@@ -124,43 +158,13 @@ async def receive_webhook(payload: CIWebhookPayload):
         payload.ci_provider,
     )
 
-    # ── Step 1: AI Analysis ──────────────────────────────────────────
-    try:
-        fix_data = analyze_build_error(payload.log_output)
-    except RuntimeError as exc:
-        logger.error("LLM analysis failed: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail=f"AI analysis failed: {exc}",
-        ) from exc
-
-    logger.info(
-        "AI fix proposal — file: %s | commit: %s",
-        fix_data.get("file_path"),
-        fix_data.get("commit_message"),
-    )
-
-    # ── Step 2: GitHub Auto-Heal ─────────────────────────────────────
-    try:
-        pr_url = create_healing_pr(
-            fix_data=fix_data,
-            repo_owner=payload.repo_owner,
-            repo_name=payload.repo_name,
-            target_branch=payload.branch,
-        )
-    except RuntimeError as exc:
-        logger.error("GitHub integration failed: %s", exc)
-        raise HTTPException(
-            status_code=502,
-            detail=f"GitHub integration failed: {exc}",
-        ) from exc
-
-    logger.info("Healing complete — PR: %s", pr_url)
+    # Queue background task for non-blocking execution
+    background_tasks.add_task(execute_self_healing, payload)
 
     return HealingResponse(
+        status="processing",
         build_id=payload.build_id,
         repository=f"{target_owner}/{target_repo}",
         target_branch=target_branch,
-        pr_url=pr_url,
-        fix_summary=fix_data,
+        message="Self-healing pipeline initiated. Analysis and PR generation running asynchronously.",
     )
