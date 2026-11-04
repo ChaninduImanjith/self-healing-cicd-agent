@@ -36,6 +36,7 @@ Your task:
 3. Produce the minimal, safe fix.
 
 CRITICAL RULES:
+- Focus exclusively on the fatal error that caused the non-zero exit code (e.g. "ERROR:", "No matching distribution found", "Traceback"). Completely IGNORE GitHub Actions runner deprecation warnings.
 - For pip install dependency failures, ALWAYS patch the package list in "requirements.txt". NEVER attempt to modify CI workflow files (.github/workflows/*.yml) to bypass dependency errors.
 - If a package dependency cannot be found on the public registry (e.g. "No matching distribution found" or "404 Not Found"), do NOT just remove version constraints while leaving the nonexistent package name. Instead, remove or comment out the line (e.g. "# <package_name> removed: dependency unavailable on PyPI") in requirements.txt so the build cleanly passes.
 - file_path MUST be a valid relative repository file path (e.g. "requirements.txt", "Dockerfile"). NEVER return "UNKNOWN" for standard dependency errors.
@@ -78,6 +79,15 @@ def analyze_build_error(error_log: str) -> dict:
             "META_API_KEY is not set. Add it to your .env file."
         )
 
+    # Filter non-fatal runner warnings (e.g. Node.js deprecation warnings) so the LLM focuses exclusively on the fatal failure
+    filtered_lines = [
+        line for line in error_log.splitlines()
+        if not line.strip().startswith("##[warning]")
+        and "Node.js 20 is deprecated" not in line
+        and "forced to run on Node.js 24" not in line
+    ]
+    cleaned_log = "\n".join(filtered_lines)
+
     headers = {
         "Authorization": f"Bearer {META_API_KEY}",
         "Content-Type": "application/json",
@@ -92,7 +102,7 @@ def analyze_build_error(error_log: str) -> dict:
                 "content": (
                     "Analyze the following CI/CD build failure log and return "
                     "the JSON fix object.\n\n"
-                    f"--- BEGIN LOG ---\n{error_log}\n--- END LOG ---"
+                    f"--- BEGIN LOG ---\n{cleaned_log}\n--- END LOG ---"
                 ),
             },
         ],
