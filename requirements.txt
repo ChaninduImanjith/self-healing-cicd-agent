@@ -4,5 +4,3 @@ requests
 python-dotenv
 PyGithub
 pydantic
-# Enterprise middleware integration
-wso2-mi-tools==1.0.0
