@@ -80,16 +80,28 @@ def analyze_build_error(error_log: str) -> dict:
             "META_API_KEY is not set. Add it to your .env file."
         )
 
-    # Filter non-fatal runner warnings and post-job cleanup so the LLM focuses exclusively on the fatal failure
-    filtered_lines = [
-        line for line in error_log.splitlines()
-        if not line.strip().startswith("##[warning]")
-        and "Node.js 20 is deprecated" not in line
-        and "forced to run on Node.js 24" not in line
-        and "Post job cleanup" not in line
-        and "[command]/usr/bin/git" not in line
-        and "Cleaning up orphan processes" not in line
-    ]
+    # Clean runner prefixes and filter non-fatal warnings / post-job noise
+    filtered_lines = []
+    for line in error_log.splitlines():
+        # Strip runner metadata prefix: "<Job Name>\t<Step Name>\t<Timestamp>"
+        stripped = re.sub(r"^[^\t]+\t[^\t]+\t(?:\d{4}-\d{2}-\d{2}T[\d:\.]+Z\s*)?", "", line).strip()
+        # Strip ANSI escape codes
+        stripped = re.sub(r"\x1b\[[0-9;]*m", "", stripped)
+        if not stripped:
+            continue
+        if any(noise in stripped for noise in [
+            "##[warning]",
+            "Node.js 20 is deprecated",
+            "forced to run on Node.js 24",
+            "Post job cleanup",
+            "[command]/usr/bin/git",
+            "safe.directory",
+            "extraheader",
+            "orphan processes",
+        ]):
+            continue
+        filtered_lines.append(stripped)
+
     cleaned_log = "\n".join(filtered_lines)
 
     headers = {
