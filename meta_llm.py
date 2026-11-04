@@ -200,12 +200,11 @@ def analyze_build_error(error_log: str) -> dict:
             if fix_data["commit_message"]:
                 fix_data["commit_message"] = fix_data["commit_message"][0].upper() + fix_data["commit_message"][1:]
 
-    # Safety guardrails: Detect dependency errors and enforce requirements.txt patching
-    # Workflow files (.github/workflows) are protected infrastructure. If error mentions pip/packages, redirect to requirements.txt.
-    if fix_data.get("file_path", "").endswith((".yml", ".yaml")) or "workflow" in fix_data.get("file_path", ""):
-        if any(kw in error_log for kw in ["pip", "requirements", "distribution", "satisfies", "import", "module", "wso2"]):
-            logger.warning("Prevented erroneous modification to workflow YAML file '%s'; redirected to requirements.txt", fix_data.get("file_path"))
-            fix_data["file_path"] = "requirements.txt"
+    # HARD GUARDRAIL: Workflow files (.github/workflows) are protected CI infrastructure.
+    # The agent must NEVER mutate CI workflow files (.yml / .yaml). Always redirect to requirements.txt.
+    if fix_data.get("file_path", "").endswith((".yml", ".yaml")) or ".github" in fix_data.get("file_path", ""):
+        logger.warning("Prevented erroneous modification to workflow YAML file '%s'; redirected to requirements.txt", fix_data.get("file_path"))
+        fix_data["file_path"] = "requirements.txt"
 
     is_pip_error = any(
         kw in error_log

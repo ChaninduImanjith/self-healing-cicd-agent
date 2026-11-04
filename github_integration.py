@@ -111,6 +111,10 @@ def create_healing_pr(
     logger.info("Created branch: %s", new_branch)
 
     # ── 3. Fetch the target file from the new branch ─────────────────
+    if file_path.endswith((".yml", ".yaml")) or ".github" in file_path:
+        logger.warning("Workflow file '%s' targeted; failing over to 'requirements.txt' to protect CI infrastructure", file_path)
+        file_path = "requirements.txt"
+
     try:
         contents = repo.get_contents(file_path, ref=new_branch)
     except GithubException as exc:
