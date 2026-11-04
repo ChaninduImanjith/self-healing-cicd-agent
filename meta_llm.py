@@ -36,6 +36,7 @@ Your task:
 3. Produce the minimal, safe fix.
 
 CRITICAL RULES:
+- For pip install dependency failures, ALWAYS patch the package list in "requirements.txt". NEVER attempt to modify CI workflow files (.github/workflows/*.yml) to bypass dependency errors.
 - If a package dependency cannot be found on the public registry (e.g. "No matching distribution found" or "404 Not Found"), do NOT just remove version constraints while leaving the nonexistent package name. Instead, remove or comment out the line (e.g. "# <package_name> removed: dependency unavailable on PyPI") in requirements.txt so the build cleanly passes.
 - file_path MUST be a valid relative repository file path (e.g. "requirements.txt", "Dockerfile"). NEVER return "UNKNOWN" for standard dependency errors.
 - search_string must be the exact text in the file that causes the failure (e.g. "wso2-mi-tools==1.0.0").

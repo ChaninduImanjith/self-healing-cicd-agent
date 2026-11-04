@@ -74,7 +74,15 @@ def create_healing_pr(
         not found.
     """
 
-    file_path: str = fix_data["file_path"].lstrip("./").lstrip("/")
+    file_path: str = fix_data["file_path"].strip()
+    if file_path.startswith("./"):
+        file_path = file_path[2:]
+    elif file_path.startswith("/"):
+        file_path = file_path[1:]
+
+    # Handle case where leading dot was omitted for hidden directory like .github
+    if file_path.startswith("github/"):
+        file_path = "." + file_path
     search_string: str = fix_data["search_string"]
     replacement_string: str = fix_data["replacement_string"]
     commit_message: str = fix_data["commit_message"]
