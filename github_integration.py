@@ -111,9 +111,12 @@ def create_healing_pr(
     logger.info("Created branch: %s", new_branch)
 
     # ── 3. Fetch the target file from the new branch ─────────────────
+    # SECURITY GUARDRAIL: CI workflow files (.github/workflows/*.yml) are strictly immutable.
     if file_path.endswith((".yml", ".yaml")) or ".github" in file_path:
-        logger.warning("Workflow file '%s' targeted; failing over to 'requirements.txt' to protect CI infrastructure", file_path)
-        file_path = "requirements.txt"
+        logger.error("Attempted modification to protected CI workflow file '%s'", file_path)
+        raise RuntimeError(
+            f"Security Guardrail: Automated changes to CI workflow files ({file_path}) are strictly disallowed."
+        )
 
     try:
         contents = repo.get_contents(file_path, ref=new_branch)
@@ -124,68 +127,54 @@ def create_healing_pr(
 
     original_content: str = contents.decoded_content.decode("utf-8")
 
-    if search_string not in original_content:
-        if search_string.strip() in original_content:
-            search_string = search_string.strip()
-        else:
-            # Check for partial line match (e.g. package name matching with or without version suffix)
-            pkg_name = search_string.split("==")[0].split(">=")[0].split("<=")[0].strip()
-            matching_lines = [
-                line for line in original_content.splitlines()
-                if pkg_name in line and not line.strip().startswith("#")
-            ]
-            if matching_lines:
-                logger.info(
-                    "Resolved partial line match: '%s' -> '%s'",
-                    search_string,
-                    matching_lines[0],
-                )
-                search_string = matching_lines[0]
+    # ── 4. Apply the fix safely ──────────────────────────────────────
+    is_requirements = any(kw in file_path.lower() for kw in ["requirements", "dependencies", "packages.txt"])
+    updated_content = None
+
+    if is_requirements:
+        import re
+        pkg_name = re.split(r"[=<>!~]", search_string.strip())[0].strip()
+        lines = original_content.splitlines()
+        replaced = False
+        new_lines = []
+
+        for line in lines:
+            stripped = line.strip()
+            # Preserve already-commented lines as-is
+            if stripped.startswith("#"):
+                new_lines.append(line)
+                continue
+
+            line_pkg = re.split(r"[=<>!~]", stripped)[0].strip()
+            # Match the active, uncommented dependency line
+            if not replaced and (stripped == search_string.strip() or (pkg_name and line_pkg == pkg_name)):
+                if not (new_lines and new_lines[-1].strip() == replacement_string.strip()):
+                    new_lines.append(replacement_string)
+                replaced = True
             else:
-                # If a workflow file was mistakenly targeted and the string was not found, check if requirements.txt has an unresolvable dependency
-                if file_path.endswith((".yml", ".yaml")):
-                    try:
-                        req_contents = repo.get_contents("requirements.txt", ref=new_branch)
-                        req_text = req_contents.decoded_content.decode("utf-8")
-                        matching_dep = [l for l in req_text.splitlines() if "wso2-mi-tools" in l or ("==" in l and not l.strip().startswith("#"))]
-                        if matching_dep:
-                            target_dep = [l for l in req_text.splitlines() if "wso2-mi-tools" in l]
-                            chosen = target_dep[0] if target_dep else matching_dep[0]
-                            logger.warning("Workflow file targeted incorrectly; automatically failing over to patch requirements.txt for '%s'", chosen)
-                            file_path = "requirements.txt"
-                            contents = req_contents
-                            original_content = req_text
-                            search_string = chosen
-                            replacement_string = f"# {chosen} removed: dependency unavailable on PyPI"
-                            commit_message = f"Remove unavailable {chosen.split('==')[0]} dependency to restore successful build"
-                    except Exception as err:
-                        logger.error("Requirements failover check encountered error: %s", err)
+                new_lines.append(line)
 
-                if search_string not in original_content:
-                    pkg_name = search_string.split("==")[0].split(">=")[0].split("<=")[0].strip()
-                    if pkg_name not in original_content or any(pkg_name in line and line.strip().startswith("#") for line in original_content.splitlines()):
-                        logger.info("Target package '%s' is already removed or commented out in '%s'. Repository is already clean.", pkg_name, file_path)
-                        return ""
-                    raise RuntimeError(
-                        f"search_string '{search_string}' not found in '{file_path}'. "
-                        "The target line was not found in the file."
-                    )
-
-    # ── 4. Apply the fix ─────────────────────────────────────────────
-    updated_content = original_content.replace(
-        search_string, replacement_string, 1
-    )
-
-    # Safety validation: If updating a YAML workflow file, enforce valid YAML syntax
-    if file_path.endswith((".yml", ".yaml")):
-        try:
-            import yaml
-            yaml.safe_load(updated_content)
-            if updated_content.count("steps:") > 1:
-                raise ValueError("Duplicate 'steps:' key detected in workflow YAML.")
-        except Exception as yaml_err:
-            logger.error("YAML validation failed on proposed fix: %s. Aborting invalid workflow mutation.", yaml_err)
-            raise RuntimeError(f"Proposed YAML fix for '{file_path}' produced invalid syntax: {yaml_err}")
+        if replaced:
+            updated_content = "\n".join(new_lines) + ("\n" if original_content.endswith("\n") else "")
+        else:
+            # Check if it was already commented out
+            if any(pkg_name in l and l.strip().startswith("#") for l in lines):
+                logger.info("Target package '%s' is already commented out in '%s'. Repository is clean.", pkg_name, file_path)
+                return ""
+            raise RuntimeError(
+                f"Active dependency for '{search_string}' not found in '{file_path}'."
+            )
+    else:
+        # Standard source code file patching
+        if search_string in original_content:
+            updated_content = original_content.replace(search_string, replacement_string, 1)
+        elif search_string.strip() in original_content:
+            updated_content = original_content.replace(search_string.strip(), replacement_string, 1)
+        else:
+            raise RuntimeError(
+                f"search_string '{search_string}' not found in '{file_path}'. "
+                "The target code segment was not found in the file."
+            )
 
     repo.update_file(
         path=file_path,

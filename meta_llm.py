@@ -89,11 +89,15 @@ def analyze_build_error(error_log: str) -> dict:
         stripped = re.sub(r"\x1b\[[0-9;]*m", "", stripped)
         if not stripped:
             continue
+
+        # Truncate at post-job runner cleanup to eliminate runner git noise & checkout warnings
+        if "Post job cleanup" in stripped:
+            break
+
         if any(noise in stripped for noise in [
             "##[warning]",
             "Node.js 20 is deprecated",
             "forced to run on Node.js 24",
-            "Post job cleanup",
             "[command]/usr/bin/git",
             "safe.directory",
             "extraheader",
@@ -200,28 +204,6 @@ def analyze_build_error(error_log: str) -> dict:
             if fix_data["commit_message"]:
                 fix_data["commit_message"] = fix_data["commit_message"][0].upper() + fix_data["commit_message"][1:]
 
-    # HARD GUARDRAIL: Workflow files (.github/workflows) are protected CI infrastructure.
-    # The agent must NEVER mutate CI workflow files (.yml / .yaml). Always redirect to requirements.txt.
-    if fix_data.get("file_path", "").endswith((".yml", ".yaml")) or ".github" in fix_data.get("file_path", ""):
-        logger.warning("Prevented erroneous modification to workflow YAML file '%s'; redirected to requirements.txt", fix_data.get("file_path"))
-        fix_data["file_path"] = "requirements.txt"
-        
-        # Override search_string to avoid looking for workflow steps inside requirements.txt
-        bad_pkg = "wso2-mi-tools==1.0.0"
-        pkg_match = re.search(
-            r"(?:No matching distribution found for|satisfies the requirement)\s+([a-zA-Z0-9_\-\.]+(=[=<>!~]?[0-9a-zA-Z\.\-_]*)?)",
-            error_log,
-        )
-        if pkg_match:
-            bad_pkg = pkg_match.group(1).split()[0].strip()
-        elif "wso2-mi-tool==1.0.0" in error_log:
-            bad_pkg = "wso2-mi-tool==1.0.0"
-
-        fix_data["search_string"] = bad_pkg
-        fix_data["replacement_string"] = f"# {bad_pkg} removed: dependency unavailable on PyPI"
-        fix_data["commit_message"] = f"Remove unavailable {bad_pkg.split('==')[0]} dependency to restore successful build"
-        fix_data["root_cause_explanation"] = f"Package {bad_pkg} was not found on the package index. Commented out to ensure dependencies resolve cleanly."
-
     is_pip_error = any(
         kw in error_log
         for kw in [
@@ -229,33 +211,44 @@ def analyze_build_error(error_log: str) -> dict:
             "Could not find a version that satisfies",
             "pip install -r requirements.txt",
             "pip install",
-            "wso2",
+            "from versions: none",
         ]
     )
 
+    # HARD GUARDRAIL: Workflow files (.github/workflows) are protected CI infrastructure.
+    # The agent must NEVER mutate CI workflow files (.yml / .yaml). Redirect safely.
+    if fix_data.get("file_path", "").endswith((".yml", ".yaml")) or ".github" in fix_data.get("file_path", ""):
+        logger.warning(
+            "Prevented erroneous modification to workflow YAML file '%s'; redirecting to code/dependency layer",
+            fix_data.get("file_path"),
+        )
+        if is_pip_error:
+            fix_data["file_path"] = "requirements.txt"
+        elif "Dockerfile" in error_log:
+            fix_data["file_path"] = "Dockerfile"
+        else:
+            code_match = re.search(r"File [\"']([^\"']+\.(?:py|js|ts|go|java|rs))[\"']", error_log)
+            if code_match:
+                fix_data["file_path"] = code_match.group(1)
+            else:
+                fix_data["file_path"] = "requirements.txt"
+
+    # Enforce safe dependency patching for any pip package resolution failures
     if is_pip_error or fix_data.get("file_path") == "requirements.txt":
         fix_data["file_path"] = "requirements.txt"
         
-        # Extract failing package name
-        bad_pkg = None
-        if "wso2-mi-tools==1.0.0" in error_log:
-            bad_pkg = "wso2-mi-tools==1.0.0"
-        elif "wso2-mi-tool==1.0.0" in error_log:
-            bad_pkg = "wso2-mi-tool==1.0.0"
-        else:
-            pkg_match = re.search(
-                r"(?:No matching distribution found for|satisfies the requirement)\s+([a-zA-Z0-9_\-\.]+(=[=<>!~]?[0-9a-zA-Z\.\-_]*)?)",
-                error_log,
-            )
-            if pkg_match:
-                bad_pkg = pkg_match.group(1).split()[0].strip()
-
-        if bad_pkg:
-            logger.info("Enforcing requirements.txt patch for package '%s'", bad_pkg)
+        # Dynamically extract failing package name across any repository
+        pkg_match = re.search(
+            r"(?:No matching distribution found for|satisfies the requirement)\s+([a-zA-Z0-9_\-\.]+(=[=<>!~]?[0-9a-zA-Z\.\-_]*)?)",
+            error_log,
+        )
+        if pkg_match:
+            bad_pkg = pkg_match.group(1).split()[0].strip()
+            logger.info("Dynamically extracted failing package '%s' from build log", bad_pkg)
             fix_data["search_string"] = bad_pkg
             fix_data["replacement_string"] = f"# {bad_pkg} removed: dependency unavailable on PyPI"
             fix_data["commit_message"] = f"Remove unavailable {bad_pkg.split('==')[0]} dependency to restore successful build"
-            fix_data["root_cause_explanation"] = f"The package {bad_pkg} was not found on the package index. Commented out to ensure dependencies resolve cleanly."
+            fix_data["root_cause_explanation"] = f"Package {bad_pkg} could not be resolved from PyPI package registry. Commented out to ensure dependencies resolve cleanly."
 
     elif fix_data.get("file_path") in ["UNKNOWN", "", None]:
         if "Dockerfile" in error_log:
