@@ -124,10 +124,24 @@ def create_healing_pr(
         if search_string.strip() in original_content:
             search_string = search_string.strip()
         else:
-            raise RuntimeError(
-                f"search_string '{search_string}' not found in '{file_path}'. "
-                "The target line was not found in the file."
-            )
+            # Check for partial line match (e.g. package name matching with or without version suffix)
+            pkg_name = search_string.split("==")[0].split(">=")[0].split("<=")[0].strip()
+            matching_lines = [
+                line for line in original_content.splitlines()
+                if pkg_name in line and not line.strip().startswith("#")
+            ]
+            if matching_lines:
+                logger.info(
+                    "Resolved partial line match: '%s' -> '%s'",
+                    search_string,
+                    matching_lines[0],
+                )
+                search_string = matching_lines[0]
+            else:
+                raise RuntimeError(
+                    f"search_string '{search_string}' not found in '{file_path}'. "
+                    "The target line was not found in the file."
+                )
 
     # ── 4. Apply the fix ─────────────────────────────────────────────
     updated_content = original_content.replace(
