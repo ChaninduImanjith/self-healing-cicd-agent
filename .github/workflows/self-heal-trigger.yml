@@ -28,7 +28,7 @@ jobs:
             RAW_LOG="${{ github.event.inputs.simulated_log }}"
           else
             echo "Fetching failed workflow run log..."
-            RAW_LOG=$(gh run view ${{ github.event.workflow_run.id }} --log-failed 2>&1 | tail -n 100 || echo "Build failed during step execution.")
+            RAW_LOG=$(gh run view ${{ github.event.workflow_run.id }} --log-failed 2>&1 | grep -v -E "(Post job cleanup|safe\.directory|extraheader|orphan processes|Node\.js 20 is deprecated|\[command\]/usr/bin/git)" | tail -n 60 || echo "Build failed during step execution.")
           fi
           
           # Encode log safely into JSON file with dynamic repository coordinates
